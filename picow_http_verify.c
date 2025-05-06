@@ -10,88 +10,156 @@
  #include "pico/async_context.h"
  #include "lwip/altcp_tls.h"
  #include "example_http_client_util.h"
+ #include "hardware/adc.h"
+  
  
- // Using this url as we know the root cert won't change for a long time
- #define HOST "fw-download-alias1.raspberrypi.com"
- #define URL_REQUEST "/net_install/boot.sig"
+ #define HOST "app-http-server-rasp.onrender.com"
+ #define URL_REQUEST "/status"
+ 
+ #define BUTTON1 5
+ #define JOYSTICK_X 26
+ #define JOYSTICK_Y 27
  
  // This is the PUBLIC root certificate exported from a browser
- // Note that the newlines are needed
- #define TLS_ROOT_CERT_OK "-----BEGIN CERTIFICATE-----\n\
- MIIC+jCCAn+gAwIBAgICEAAwCgYIKoZIzj0EAwIwgbcxCzAJBgNVBAYTAkdCMRAw\n\
- DgYDVQQIDAdFbmdsYW5kMRIwEAYDVQQHDAlDYW1icmlkZ2UxHTAbBgNVBAoMFFJh\n\
- c3BiZXJyeSBQSSBMaW1pdGVkMRwwGgYDVQQLDBNSYXNwYmVycnkgUEkgRUNDIENB\n\
- MR0wGwYDVQQDDBRSYXNwYmVycnkgUEkgUm9vdCBDQTEmMCQGCSqGSIb3DQEJARYX\n\
- c3VwcG9ydEByYXNwYmVycnlwaS5jb20wIBcNMjExMjA5MTEzMjU1WhgPMjA3MTEx\n\
- MjcxMTMyNTVaMIGrMQswCQYDVQQGEwJHQjEQMA4GA1UECAwHRW5nbGFuZDEdMBsG\n\
- A1UECgwUUmFzcGJlcnJ5IFBJIExpbWl0ZWQxHDAaBgNVBAsME1Jhc3BiZXJyeSBQ\n\
- SSBFQ0MgQ0ExJTAjBgNVBAMMHFJhc3BiZXJyeSBQSSBJbnRlcm1lZGlhdGUgQ0Ex\n\
- JjAkBgkqhkiG9w0BCQEWF3N1cHBvcnRAcmFzcGJlcnJ5cGkuY29tMHYwEAYHKoZI\n\
- zj0CAQYFK4EEACIDYgAEcN9K6Cpv+od3w6yKOnec4EbyHCBzF+X2ldjorc0b2Pq0\n\
- N+ZvyFHkhFZSgk2qvemsVEWIoPz+K4JSCpgPstz1fEV6WzgjYKfYI71ghELl5TeC\n\
- byoPY+ee3VZwF1PTy0cco2YwZDAdBgNVHQ4EFgQUJ6YzIqFh4rhQEbmCnEbWmHEo\n\
- XAUwHwYDVR0jBBgwFoAUIIAVCSiDPXut23NK39LGIyAA7NAwEgYDVR0TAQH/BAgw\n\
- BgEB/wIBADAOBgNVHQ8BAf8EBAMCAYYwCgYIKoZIzj0EAwIDaQAwZgIxAJYM+wIM\n\
- PC3wSPqJ1byJKA6D+ZyjKR1aORbiDQVEpDNWRKiQ5QapLg8wbcED0MrRKQIxAKUT\n\
- v8TJkb/8jC/oBVTmczKlPMkciN+uiaZSXahgYKyYhvKTatCTZb+geSIhc0w/2w==\n\
+  // Note that the newlines are needed
+  #define TLS_ROOT_CERT_OK "-----BEGIN CERTIFICATE-----\n\
+ MIICCTCCAY6gAwIBAgINAgPlwGjvYxqccpBQUjAKBggqhkjOPQQDAzBHMQswCQYD\n\
+ VQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEUMBIG\n\
+ A1UEAxMLR1RTIFJvb3QgUjQwHhcNMTYwNjIyMDAwMDAwWhcNMzYwNjIyMDAwMDAw\n\
+ WjBHMQswCQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2Vz\n\
+ IExMQzEUMBIGA1UEAxMLR1RTIFJvb3QgUjQwdjAQBgcqhkjOPQIBBgUrgQQAIgNi\n\
+ AATzdHOnaItgrkO4NcWBMHtLSZ37wWHO5t5GvWvVYRg1rkDdc/eJkTBa6zzuhXyi\n\
+ QHY7qca4R9gq55KRanPpsXI5nymfopjTX15YhmUPoYRlBtHci8nHc8iMai/lxKvR\n\
+ HYqjQjBAMA4GA1UdDwEB/wQEAwIBhjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQW\n\
+ BBSATNbrdP9JNqPV2Py1PsVq8JQdjDAKBggqhkjOPQQDAwNpADBmAjEA6ED/g94D\n\
+ 9J+uHXqnLrmvT/aDHQ4thQEd0dlq7A/Cr8deVl5c1RxYIigL9zC2L7F8AjEA8GE8\n\
+ p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD\n\
  -----END CERTIFICATE-----\n"
+  
  
- // This is a test certificate
- #define TLS_ROOT_CERT_BAD "-----BEGIN CERTIFICATE-----\n\
- MIIDezCCAwGgAwIBAgICEAEwCgYIKoZIzj0EAwIwgasxCzAJBgNVBAYTAkdCMRAw\n\
- DgYDVQQIDAdFbmdsYW5kMR0wGwYDVQQKDBRSYXNwYmVycnkgUEkgTGltaXRlZDEc\n\
- MBoGA1UECwwTUmFzcGJlcnJ5IFBJIEVDQyBDQTElMCMGA1UEAwwcUmFzcGJlcnJ5\n\
- IFBJIEludGVybWVkaWF0ZSBDQTEmMCQGCSqGSIb3DQEJARYXc3VwcG9ydEByYXNw\n\
- YmVycnlwaS5jb20wHhcNMjExMjA5MTMwMjIyWhcNNDYxMjAzMTMwMjIyWjA6MQsw\n\
- CQYDVQQGEwJHQjErMCkGA1UEAwwiZnctZG93bmxvYWQtYWxpYXMxLnJhc3BiZXJy\n\
- eXBpLmNvbTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJ6BQv8YtNiNv7ibLtt4\n\
- lwpgEr2XD4sOl9wu/l8GnGD5p39YK8jZV0j6HaTNkqi86Nly1H7YklzbxhFy5orM\n\
- 356jggGDMIIBfzAJBgNVHRMEAjAAMBEGCWCGSAGG+EIBAQQEAwIGQDAzBglghkgB\n\
- hvhCAQ0EJhYkT3BlblNTTCBHZW5lcmF0ZWQgU2VydmVyIENlcnRpZmljYXRlMB0G\n\
- A1UdDgQWBBRlONP3G2wTERZA9D+VxJABfiaCVTCB5QYDVR0jBIHdMIHagBQnpjMi\n\
- oWHiuFARuYKcRtaYcShcBaGBvaSBujCBtzELMAkGA1UEBhMCR0IxEDAOBgNVBAgM\n\
- B0VuZ2xhbmQxEjAQBgNVBAcMCUNhbWJyaWRnZTEdMBsGA1UECgwUUmFzcGJlcnJ5\n\
- IFBJIExpbWl0ZWQxHDAaBgNVBAsME1Jhc3BiZXJyeSBQSSBFQ0MgQ0ExHTAbBgNV\n\
- BAMMFFJhc3BiZXJyeSBQSSBSb290IENBMSYwJAYJKoZIhvcNAQkBFhdzdXBwb3J0\n\
- QHJhc3BiZXJyeXBpLmNvbYICEAAwDgYDVR0PAQH/BAQDAgWgMBMGA1UdJQQMMAoG\n\
- CCsGAQUFBwMBMAoGCCqGSM49BAMCA2gAMGUCMEHerJRT0WmG5tz4oVLSIxLbCizd\n\
- //SdJBCP+072zRUKs0mfl5EcO7dXWvBAb386PwIxAL7LrgpJroJYrYJtqeufJ3a9\n\
- zVi56JFnA3cNTcDYfIzyzy5wUskPAykdrRrCS534ig==\n\
- -----END CERTIFICATE-----\n"
  
- int main() {
+ typedef struct {
+     uint16_t x;
+     uint16_t y;
+ } ADCValues;
+ 
+ ADCValues read_jostick(){
+ 
+     ADCValues values;
+     adc_select_input(1);
+     values.x = adc_read();
+ 
+     adc_select_input(0);
+     values.y = adc_read();
+ 
+     return values;
+ }
+ 
+ bool read_button()
+ {
+     bool status = !gpio_get(BUTTON1);
+     return status;
+ }
+ 
+ float read_sensor()
+ {
+     // Configura o ADC
+     adc_select_input(4);
+     uint16_t adc_raw = adc_read();
+     
+     // Converter para tensão
+     float adc_voltage = (adc_raw / 4095.0f) * 3.3f;
+     
+     // Calcular a temperatura
+     float temperature = 27.0f - (adc_voltage - 0.706f) / 0.001721f;
+     
+     // Exibir a temperatur
+     
+     return temperature;
+ }
+ 
+ 
+ 
+ 
+ int main()
+ {
      stdio_init_all();
-     if (cyw43_arch_init()) {
+     sleep_ms(2000);
+     printf("inicializando raspberry pi pico");
+     
+     gpio_init(BUTTON1);
+     gpio_set_dir(BUTTON1, false);
+     gpio_pull_up(BUTTON1);
+     
+     adc_init();
+     adc_set_temp_sensor_enabled(true);
+   
+ 
+     adc_gpio_init(JOYSTICK_X);
+     adc_gpio_init(JOYSTICK_Y);
+ 
+     if (cyw43_arch_init())
+     {
          printf("failed to initialise\n");
          return 1;
      }
      cyw43_arch_enable_sta_mode();
-     if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
+     if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 10000))
+     {
          printf("failed to connect\n");
          return 1;
      }
-     // This should work
+ 
+ 
      static const uint8_t cert_ok[] = TLS_ROOT_CERT_OK;
-     EXAMPLE_HTTP_REQUEST_T req = {0};
-     req.hostname = HOST;
-     req.url = URL_REQUEST;
-     req.headers_fn = http_client_header_print_fn;
-     req.recv_fn = http_client_receive_print_fn;
-     req.tls_config = altcp_tls_create_config_client(cert_ok, sizeof(cert_ok));
-     int pass = http_client_request_sync(cyw43_arch_async_context(), &req);
-     altcp_tls_free_config(req.tls_config);
+     EXAMPLE_HTTP_REQUEST_T req1 = {0};
+     req1.hostname = HOST;
+     req1.port = 443,
+     req1.headers_fn = http_client_header_print_fn; 
+     req1.recv_fn = http_client_receive_print_fn;
+     // req1.tls_config = altcp_tls_create_config_client(cert_ok, sizeof(cert_ok));
+     // altcp_tls_free_config(req1.tls_config);
  
-     // Repeat the test with the wrong certificate. It should fail
-     static const uint8_t cert_bad[] = TLS_ROOT_CERT_BAD;
-     req.tls_config = altcp_tls_create_config_client(cert_bad, sizeof(cert_bad));
-     int fail = http_client_request_sync(cyw43_arch_async_context(), &req);
-     altcp_tls_free_config(req.tls_config);
  
-     if (pass != 0 || fail == 0) {
-         panic("test failed");
+     while (true)
+     {
+         
+         if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
+             printf("Conexão Wi-Fi perdida, tentando reconectar...\n");
+             while (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
+                 printf("Tentando reconectar ao Wi-Fi...\n");
+                 sleep_ms(5000);
+             }
+             printf("Reconectado ao Wi-Fi\n");
+         }
+ 
+         bool status_button = read_button();
+         float sensor_data = read_sensor();
+         ADCValues values = read_jostick();
+ 
+         char full_url[50];
+ 
+         snprintf(full_url, sizeof(full_url), "%s?button=%d&sensor=%.2f&x=%d&y=%d",URL_REQUEST,status_button,sensor_data,values.x,values.y);
+ 
+         req1.url = full_url;
+         printf("status botao %d \n", status_button);
+         printf("temperatura %.2f °C\n", sensor_data);
+ 
+         req1.tls_config = altcp_tls_create_config_client(cert_ok, sizeof(cert_ok));
+         int result = http_client_request_sync(cyw43_arch_async_context(),&req1);
+         altcp_tls_free_config(req1.tls_config);
+ 
+          if (result != 0){
+              printf("Falha ao enviar dados ao servidor:%d \n", result);
+         }
+ 
+         // Processa o contexto assíncrono regularmente
+         // async_context_poll(cyw43_arch_async_context());
+         cyw43_arch_poll();
+         // tight_loop_contents();
+         sleep_ms(500);
      }
+ 
      cyw43_arch_deinit();
-     printf("Test passed\n");
-     sleep_ms(100);
      return 0;
- }  
+ }
